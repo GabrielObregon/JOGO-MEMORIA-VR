@@ -1,0 +1,385 @@
+<!doctype html>
+<html>
+  <head>
+    <title>JOGO DA MEMORIA VR</title>
+
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <script src="https://unpkg.com/aframe-environment-component@1.3.4/dist/aframe-environment-component.min.js"></script>
+    <script>
+      // Esse componente entra no 3D e ajusta o material para brilhar sem precisar de reflexos
+      AFRAME.registerComponent("brilho-trofeu", {
+        init: function () {
+          this.el.addEventListener("model-loaded", (e) => {
+            let obj = this.el.getObject3D("mesh");
+            if (!obj) return;
+
+            obj.traverse((node) => {
+              if (node.isMesh && node.material) {
+                // Diminui o efeito "espelho negro" e aumenta a captação de luz
+                node.material.metalness = 0.2;
+                node.material.roughness = 0.7;
+                node.material.needsUpdate = true;
+              }
+            });
+          });
+        },
+      });
+    </script>
+    <style>
+      body {
+        margin: 0;
+      }
+    </style>
+  </head>
+
+  <body>
+    <a-scene
+      renderer="colorManagement: true; physicallyCorrectLights: true;"
+      shadow="type: pcfsoft"
+      xr-mode-ui="enabled: true"
+      webxr="optionalFeatures: local-floor"
+    >
+      <!-- AMBIENTE -->
+      <a-entity
+        environment="preset: tron; lighting: distant; fog: 0.7"
+      ></a-entity>
+
+      <!-- LUZES -->
+      <a-light type="ambient" intensity="0.6"></a-light>
+      <a-light
+        type="directional"
+        position="1 4 2"
+        intensity="1.2"
+        castShadow="true"
+      >
+      </a-light>
+
+      <a-entity id="rig" position="0 0 0">
+        <!-- CÂMERA -->
+        <a-entity camera look-controls wasd-controls position="0 1.6 0">
+          <a-cursor color="#00ffff"></a-cursor>
+
+          <!-- HUD -->
+          <a-entity id="hud" position="-0.8 -0.6 -1.5">
+            <a-text
+              id="timerText"
+              value="Tempo: 0s"
+              color="#00ffff"
+              align="center"
+              width="2"
+            ></a-text>
+
+            <a-text
+              id="attemptText"
+              value="Tentativas: 0"
+              position="0 -0.25 0"
+              color="#ffffff"
+              align="center"
+              width="2"
+            ></a-text>
+          </a-entity>
+
+          <!-- MENSAGEM INICIAL -->
+          <a-entity id="introMessage" position="0 0.8 -1.5">
+            <a-plane
+              width="3"
+              height="0.5"
+              color="#000"
+              opacity="0.6"
+            ></a-plane>
+            <a-text
+              value="Jogo da Memoria! Encontre todos os pares para vencer!"
+              align="center"
+              color="#ff0000"
+              width="7"
+              wrap-count="100"
+              position="0 0 0.01"
+              scale="0.8 0.8 0.8"
+              opacity="0"
+              id="introText"
+              animation__fadein="property: opacity; from: 0; to: 1; dur: 1000"
+              animation__fadeout="property: opacity; from: 1; to: 0; dur: 1000; delay: 4000"
+            >
+            </a-text>
+          </a-entity>
+
+          <!-- TELA DE VITÓRIA -->
+          <a-entity id="victory" visible="false" position="0 0.8 -1.5">
+            <a-plane
+              id="victoryBg"
+              width="3"
+              height="0.5"
+              color="#000"
+              opacity="0.6"
+            >
+            </a-plane>
+            <a-text
+              value="🏆 VITORIA!"
+              align="center"
+              color="#ff0000"
+              wrap-count="100"
+              scale="0.8 0.8 0.8"
+              width="7"
+              position="0 0 0.01"
+              opacity="0"
+              id="victoryText"
+            >
+            </a-text>
+          </a-entity>
+        </a-entity>
+        <!-- CONTROLES VR -->
+        <a-entity laser-controls="hand: left" raycaster="objects: .clickable">
+        </a-entity>
+        <a-entity laser-controls="hand: right" raycaster="objects: .clickable">
+        </a-entity>
+      </a-entity>
+      <!-- TABULEIRO -->
+      <a-assets>
+        <a-asset-item id="trophy-model" src="trofeu.glb"></a-asset-item>
+      </a-assets>
+
+      <a-entity id="card-container" position="-1.65 3 -3"></a-entity>
+
+      <!-- TROFÉU -->
+      <a-entity
+        id="victoryTrophy"
+        gltf-model="#trophy-model"
+        position="0 1 -1"
+        scale="0.005 0.005 0.005"
+        visible="false"
+        animation="property: rotation; to: 0 360 0; loop: true; dur: 4000"
+        brilho-trofeu
+      >
+      </a-entity>
+    </a-scene>
+
+    <script>
+      const colors = [
+        "#FF4136",
+        "#0074D9",
+        "#2ECC40",
+        "#FFDC00",
+        "#B10DC9",
+        "#FF851B",
+      ];
+
+      let deck = [...colors, ...colors].sort(() => Math.random() - 0.5);
+
+      let selected = [];
+      let lock = false;
+      let pairs = 0;
+      let attempts = 0;
+      let time = 0;
+      let timerInterval;
+
+      const container = document.querySelector("#card-container");
+      const attemptText = document.querySelector("#attemptText");
+      const timerText = document.querySelector("#timerText");
+
+      // Timer só começa na primeira jogada
+      let gameStarted = false;
+
+      // Remove mensagem inicial após 5s
+      setTimeout(() => {
+        const intro = document.querySelector("#introMessage");
+        if (intro) intro.parentNode.removeChild(intro);
+      }, 5000);
+
+      deck.forEach((color, index) => {
+        const col = index % 4;
+        const row = Math.floor(index / 4);
+
+        const card = document.createElement("a-box");
+
+        card.setAttribute("position", `${col * 1.1} ${row * -1.2} 0`);
+        card.setAttribute("width", "1");
+        card.setAttribute("height", "1");
+        card.setAttribute("depth", "0.15");
+        card.setAttribute("class", "clickable");
+
+        card.setAttribute(
+          "material",
+          "color: #1c1f26; metalness: 0.2; roughness: 0.4",
+        );
+
+        card.setAttribute("shadow", "cast: true; receive: true");
+
+        card.dataset.color = color;
+
+        card.addEventListener("click", function () {
+          // Inicia timer na primeira interação
+          if (!gameStarted) {
+            gameStarted = true;
+            startTimer();
+          }
+
+          if (
+            lock ||
+            selected.includes(this) ||
+            this.dataset.revealed === "true"
+          )
+            return;
+
+          this.setAttribute(
+            "animation__flip",
+            "property: rotation; to: 0 180 0; dur: 300; easing: easeInOutQuad",
+          );
+
+          setTimeout(() => {
+            this.setAttribute("color", this.dataset.color);
+          }, 150);
+
+          selected.push(this);
+
+          if (selected.length === 2) {
+            attempts++;
+            attemptText.setAttribute("value", `Tentativas: ${attempts}`);
+            lock = true;
+            setTimeout(checkMatch, 800);
+          }
+        });
+
+        container.appendChild(card);
+      });
+
+      function checkMatch() {
+        const [c1, c2] = selected;
+
+        if (c1.dataset.color === c2.dataset.color) {
+          c1.dataset.revealed = "true";
+          c2.dataset.revealed = "true";
+
+          c1.setAttribute(
+            "material",
+            `color: ${c1.dataset.color};
+             emissive: ${c1.dataset.color};
+             emissiveIntensity: 0.6`,
+          );
+
+          c2.setAttribute(
+            "material",
+            `color: ${c2.dataset.color};
+             emissive: ${c2.dataset.color};
+             emissiveIntensity: 0.6`,
+          );
+
+          pairs++;
+
+          if (pairs === 6) victory();
+        } else {
+          c1.setAttribute(
+            "animation__flipback",
+            "property: rotation; to: 0 0 0; dur: 300",
+          );
+
+          c2.setAttribute(
+            "animation__flipback",
+            "property: rotation; to: 0 0 0; dur: 300",
+          );
+
+          setTimeout(() => {
+            c1.setAttribute("color", "#1c1f26");
+            c2.setAttribute("color", "#1c1f26");
+          }, 150);
+        }
+
+        selected = [];
+        lock = false;
+      }
+
+      function victory() {
+        clearInterval(timerInterval);
+
+        const victoryEntity = document.querySelector("#victory");
+        const victoryText = document.querySelector("#victoryText");
+        const victoryBg = document.querySelector("#victoryBg");
+
+        victoryEntity.setAttribute("visible", "true");
+
+        // ===== TEXTO =====
+        victoryText.setAttribute(
+          "value",
+          "Parabens! Voce encontrou todos os pares!",
+        );
+        victoryText.setAttribute("opacity", "0");
+        victoryText.setAttribute(
+          "animation__fadein",
+          "property: opacity; from: 0; to: 1; dur: 1000",
+        );
+        victoryText.setAttribute(
+          "animation__fadeout",
+          "property: opacity; from: 1; to: 0; dur: 1000; delay: 4000",
+        );
+
+        // ===== FUNDO =====
+        victoryBg.setAttribute("opacity", "0");
+        victoryBg.setAttribute(
+          "animation__fadein",
+          "property: opacity; from: 0; to: 0.6; dur: 1000",
+        );
+        victoryBg.setAttribute(
+          "animation__fadeout",
+          "property: opacity; from: 0.6; to: 0; dur: 1000; delay: 4000",
+        );
+
+        // Esconde tudo depois de 5s
+        setTimeout(() => {
+          victoryEntity.setAttribute("visible", "false");
+        }, 5000);
+
+        dispararConfetes();
+
+        document
+          .querySelector("#victoryTrophy")
+          .setAttribute("visible", "true");
+      }
+
+      function startTimer() {
+        timerInterval = setInterval(() => {
+          time++;
+          timerText.setAttribute("value", `Tempo: ${time}s`);
+        }, 1000);
+      }
+
+      function dispararConfetes() {
+        const scene = document.querySelector("a-scene");
+
+        for (let i = 0; i < 120; i++) {
+          const confete = document.createElement("a-plane");
+
+          const x = (Math.random() - 0.5) * 6;
+          const y = 5 + Math.random() * 2;
+          const z = -1 - Math.random() * 3;
+
+          confete.setAttribute("position", `${x} ${y} ${z}`);
+          confete.setAttribute("width", "0.1");
+          confete.setAttribute("height", "0.1");
+
+          confete.setAttribute(
+            "material",
+            `color: hsl(${Math.random() * 360}, 80%, 60%);
+             side: double`,
+          );
+
+          confete.setAttribute(
+            "animation__fall",
+            `property: position;
+             to: ${x} 0 ${z};
+             dur: ${2000 + Math.random() * 2000};
+             easing: linear`,
+          );
+
+          confete.setAttribute(
+            "animation__spin",
+            `property: rotation;
+             to: ${Math.random() * 720} ${Math.random() * 720} ${Math.random() * 720};
+             dur: 2000;
+             loop: true`,
+          );
+
+          scene.appendChild(confete);
+        }
+      }
+    </script>
+  </body>
+</html>
