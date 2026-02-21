@@ -27,7 +27,7 @@ A aplicação permite interação tanto em modo desktop (mouse) quanto em modo V
 
 1. Clone o repositório:
 
-   git clone https://github.com/seu-usuario/jogo-memoria-vr.git
+   git clone https://github.com/GabrielObregon/JOGO-MEMORIA-VR.git
 
 2. Acesse a pasta do projeto.
 
